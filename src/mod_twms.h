@@ -114,8 +114,9 @@ struct twms_conf {
     apr_array_header_t *regexp;
 
     // The output and input raster figures
-    TiledRaster raster, inraster;
+    TiledRaster raster;
 
+    int enabled;
 };
 
 extern module AP_MODULE_DECLARE_DATA twms_module;

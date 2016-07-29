@@ -11,6 +11,17 @@
 #include <clocale>
 #include <cmath>
 
+// Tokenize the URI parameters
+static apr_table_t* tokenize_args(request_rec *r)
+{
+    apr_table_t *tab = apr_table_make(r->pool, 8);
+    const char *val, *key, *data = r->args;
+    for (data = r->args; data && *data && (val = ap_getword(r->pool, &data, '&'));)
+        if (key = ap_getword(r->pool, &val, '='))
+            apr_table_addn(tab, key, val);
+    return tab;
+}
+
 static void init_rsets(apr_pool_t *p, struct TiledRaster &raster)
 {
     // Clean up pagesize defaults
@@ -95,10 +106,9 @@ static const char *ConfigRaster(apr_pool_t *p, apr_table_t *kvp, struct TiledRas
     // Optional page size, defaults to 512x512
     raster.pagesize.x = raster.pagesize.y = 512;
     line = apr_table_get(kvp, "PageSize");
-    if (line) {
-        err_message = get_xyzc_size(&(raster.pagesize), line);
-        if (err_message) return apr_pstrcat(p, "PageSize", err_message, NULL);
-    }
+    if (line)
+        if (err_message = get_xyzc_size(&(raster.pagesize), line))
+            return apr_pstrcat(p, "PageSize", err_message, NULL);
 
     // Optional data type, defaults to unsigned byte
     raster.datatype = GetDT(apr_table_get(kvp, "DataType"));
@@ -114,11 +124,11 @@ static const char *ConfigRaster(apr_pool_t *p, apr_table_t *kvp, struct TiledRas
     // Bounding box: minx, miny, maxx, maxy
     raster.bbox.xmin = raster.bbox.ymin = 0.0;
     raster.bbox.xmax = raster.bbox.ymax = 1.0;
+
     line = apr_table_get(kvp, "BoundingBox");
     if (line)
-        err_message = getbbox(line, &raster.bbox);
-    if (err_message)
-        return apr_pstrcat(p, "BoundingBox", err_message, NULL);
+        if (err_message = getbbox(line, &raster.bbox))
+            return apr_pstrcat(p, "BoundingBox", err_message, NULL);
 
     init_rsets(p, raster);
 
@@ -167,15 +177,16 @@ static const char *read_config(cmd_parms *cmd, twms_conf *c, const char *src, co
     apr_table_t *kvp = read_pKVP_from_file(cmd->temp_pool, src, &err_message);
     if (NULL == kvp) return err_message;
 
-    err_message = const_cast<char*>(ConfigRaster(cmd->pool, kvp, c->inraster));
+    err_message = const_cast<char*>(ConfigRaster(cmd->pool, kvp, c->raster));
     if (err_message) return apr_pstrcat(cmd->pool, "Source ", err_message, NULL);
 
-    // Then the real configuration file
+    // Then the twms configuration file
     kvp = read_pKVP_from_file(cmd->temp_pool, fname, &err_message);
     if (NULL == kvp) return err_message;
-    err_message = const_cast<char *>(ConfigRaster(cmd->pool, kvp, c->raster));
-    if (err_message) return err_message;
 
+    // TODO: fetch TWMS specific parameters
+
+    c->enabled = true;
 }
 
 // Allow for one or more RegExp guard
@@ -203,12 +214,85 @@ static void *create_dir_config(apr_pool_t *p, char *path)
     return c;
 }
 
-static void register_hooks(apr_pool_t *p) {
+static bool our_request(request_rec *r) {
+    if (r->method_number != M_GET) return false;
+    if (r->args) return false; // Don't accept arguments
 
+    twms_conf *cfg = static_cast<twms_conf *>ap_get_module_config(r->per_dir_config, &twms_module);
+    if (!cfg->enabled) return false;
+
+    if (cfg->regexp) { // Check the guard regexps if they exist, matches agains URL
+        char *url_to_match = r->args ? apr_pstrcat(r->pool, r->uri, "?", r->args, NULL) : r->uri;
+        for (int i = 0; i < cfg->regexp->nelts; i++) {
+            ap_regex_t *m = &APR_ARRAY_IDX(cfg->regexp, i, ap_regex_t);
+            if (!ap_regexec(m, url_to_match, 0, NULL, 0)) return true; // Found
+        }
+    }
+    return false;
+}
+
+//
+// Are the three values in increasing order, usefule for checking that b is between a and c,
+// especially useful for floating point types
+//
+template<typename T> bool ordered(const T &a, const T &b, const T &c) {
+    return (a <= b && b <= c);
+}
+
+// Fills in sz and returns it if the bounding box matches a given tile, otherwise returns NULL
+static sz *bbox_to_tile(const TiledRaster &raster, const bbox_t &bb, sz *tile) {
+    // Tile size in real coordinates
+    double resx = bb.xmax - bb.xmin;
+    double dx = resx / raster.pagesize.x / 2;
+    double resy = bb.ymax - bb.ymin;
+    double dy = resy / raster.pagesize.y / 2;
+
+    // Search for a resolution match
+    for (int l = 0; l < raster.n_levels; l++) {
+        const double rx = raster.rsets[l].rx * raster.pagesize.x; // tile resolution
+        if (!ordered(resx - dx, rx, resx + dx)) continue;
+        const double ry = raster.rsets[l].ry * raster.pagesize.y; // tile resolution
+        if (!ordered(resy - dy, ry , resy + dy)) continue;
+        // Found a match at level l
+        tile->l = l;
+        // figure out the tile row and column
+        // Casting truncates, add half pixel to avoid the fp noise
+        tile->x = static_cast<apr_int64_t>((bb.xmin + dx - raster.bbox.xmin) / rx);
+        tile->y = static_cast<apr_int64_t>((raster.bbox.ymax - bb.ymax - dy) / ry);
+        // Check that the provided coordinates are within half pixel
+        if (!ordered(tile->x * rx - dx, bb.xmin, tile->x*rx + dx)) return NULL;
+        if (!ordered(tile->y * ry - dx, bb.ymax, tile->y*ry + dy)) return NULL;
+        // Indeed, this is the right tile
+        return tile;
+    }
+    return NULL;
+}
+
+static int handler(request_rec *r)
+{
+    const char *message = NULL;
+
+    if (!our_request(r)) return DECLINED;
+    apr_table_t *args = tokenize_args(r);
+    const char *bb_string = apr_table_get(args, "bbox");
+    if (!bb_string) { // Missing the required bbox argument
+        // this should be picked up by the regexp, in which case the response will be HTTP_FORBIDEN
+        return HTTP_BAD_REQUEST;
+    }
+
+    bbox_t bbox;
+    message = getbbox(bb_string, &bbox);
+    // Got the bounding box, need to figure out the tile request
+
+    return DECLINED;
+}
+
+static void register_hooks(apr_pool_t *p) {
+    ap_hook_handler(handler, NULL, NULL, APR_HOOK_MIDDLE);
 }
 
 static const command_rec cmds[] = {
-    AP_INIT_TAKE2(
+    AP_INIT_TAKE1(
     "tWMS_ConfigurationFile",
     (cmd_func)read_config, // Callback
     0, // Self-pass argument
