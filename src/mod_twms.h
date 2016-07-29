@@ -108,7 +108,7 @@ struct twms_conf {
     const char *doc_path;
 
     // Path for redirect
-    const char *source;
+    const char *source, *postfix;
 
     // array of guard regexp, one of them has to match
     apr_array_header_t *regexp;

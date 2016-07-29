@@ -178,15 +178,19 @@ static const char *read_config(cmd_parms *cmd, twms_conf *c, const char *src, co
     if (NULL == kvp) return err_message;
 
     err_message = const_cast<char*>(ConfigRaster(cmd->pool, kvp, c->raster));
-    if (err_message) return apr_pstrcat(cmd->pool, "Source ", err_message, NULL);
+    if (err_message) return err_message;
 
-    // Then the twms configuration file
-    kvp = read_pKVP_from_file(cmd->temp_pool, fname, &err_message);
-    if (NULL == kvp) return err_message;
+    line = apr_table_get(kvp, "SourcePath");
+    if (!line)
+        return "SOurcePath directive missing";
+    c->source = apr_pstrdup(cmd->pool, line);
 
-    // TODO: fetch TWMS specific parameters
+    line = apr_table_get(kvp, "SourcePostfix");
+    if (line)
+        c->postfix = apr_pstrdup(cmd->pool, line);
 
     c->enabled = true;
+    return NULL;
 }
 
 // Allow for one or more RegExp guard
@@ -216,7 +220,7 @@ static void *create_dir_config(apr_pool_t *p, char *path)
 
 static bool our_request(request_rec *r) {
     if (r->method_number != M_GET) return false;
-    if (r->args) return false; // Don't accept arguments
+    if (!r->args) return false; // tWMS takes arguments
 
     twms_conf *cfg = static_cast<twms_conf *>ap_get_module_config(r->per_dir_config, &twms_module);
     if (!cfg->enabled) return false;
@@ -254,14 +258,16 @@ static sz *bbox_to_tile(const TiledRaster &raster, const bbox_t &bb, sz *tile) {
         const double ry = raster.rsets[l].ry * raster.pagesize.y; // tile resolution
         if (!ordered(resy - dy, ry , resy + dy)) continue;
         // Found a match at level l
-        tile->l = l;
+        tile->l = l - raster.skip;
         // figure out the tile row and column
         // Casting truncates, add half pixel to avoid the fp noise
         tile->x = static_cast<apr_int64_t>((bb.xmin + dx - raster.bbox.xmin) / rx);
         tile->y = static_cast<apr_int64_t>((raster.bbox.ymax - bb.ymax - dy) / ry);
         // Check that the provided coordinates are within half pixel
-        if (!ordered(tile->x * rx - dx, bb.xmin, tile->x*rx + dx)) return NULL;
-        if (!ordered(tile->y * ry - dx, bb.ymax, tile->y*ry + dy)) return NULL;
+        double xm = raster.bbox.xmin + tile->x * rx;
+        if (!ordered(xm - dx, bb.xmin, xm + dx)) return NULL;
+        double ym = raster.bbox.ymax - tile->y * ry;
+        if (!ordered(ym - dy, bb.ymax, ym + dy)) return NULL;
         // Indeed, this is the right tile
         return tile;
     }
@@ -272,19 +278,38 @@ static int handler(request_rec *r)
 {
     const char *message = NULL;
 
-    if (!our_request(r)) return DECLINED;
+    if (!our_request(r)) 
+        return DECLINED;
     apr_table_t *args = tokenize_args(r);
     const char *bb_string = apr_table_get(args, "bbox");
-    if (!bb_string) { // Missing the required bbox argument
-        // this should be picked up by the regexp, in which case the response will be HTTP_FORBIDEN
+
+    // Missing the required bbox argument
+    if (!bb_string) 
         return HTTP_BAD_REQUEST;
-    }
+    // this should be picked up by the regexp, in which case the response will be HTTP_FORBIDEN
 
     bbox_t bbox;
     message = getbbox(bb_string, &bbox);
     // Got the bounding box, need to figure out the tile request
+    sz tile;
+    twms_conf *cfg = static_cast<twms_conf *>ap_get_module_config(r->per_dir_config, &twms_module);
+    // Convert to a source tile
+    if (&tile != bbox_to_tile(cfg->raster, bbox, &tile))
+        return HTTP_BAD_REQUEST;
 
-    return DECLINED;
+// The types and format below have to match
+    unsigned int level  = static_cast<unsigned int>(tile.l);
+    unsigned int row    = static_cast<unsigned int>(tile.y);
+    unsigned int column = static_cast<unsigned int>(tile.x);
+#define NURI_FMT "%s/%u/%u/%u"
+
+    char *new_uri = (cfg->postfix == NULL) ?
+        apr_psprintf(r->pool, NURI_FMT, cfg->source, level, row, column) :
+        apr_psprintf(r->pool, NURI_FMT "%s", cfg->source, level, row, column, cfg->postfix);
+#undef NURI_FMT
+
+    ap_internal_redirect(new_uri, r);
+    return OK; // Not sure what this does, because it was already handled
 }
 
 static void register_hooks(apr_pool_t *p) {
@@ -297,7 +322,7 @@ static const command_rec cmds[] = {
     (cmd_func)read_config, // Callback
     0, // Self-pass argument
     ACCESS_CONF, // availability
-    "Source and output configuration files"
+    "TWMS configuration file"
     ),
 
     AP_INIT_TAKE1(
