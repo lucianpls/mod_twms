@@ -16,6 +16,13 @@
   <ItemGroup>
     <ClInclude Include="src\mod_twms.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include=".gitignore" />
+    <None Include="LICENSE" />
+    <None Include="README.md" />
+    <None Include="src\Makefile" />
+    <None Include="src\Makefile.lcl.example" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{37797CB9-25A8-4959-A34B-F96C57FE249D}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
