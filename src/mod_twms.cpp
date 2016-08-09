@@ -59,16 +59,16 @@ static void init_rsets(apr_pool_t *p, struct TiledRaster &raster)
 static const char *getbbox(const char *line, bbox_t *bbox)
 {
     const char *lcl = setlocale(LC_NUMERIC, NULL);
-    const char *message = " format incorrect, expects four comma separated C locale numbers";
+    const char *message = " incorrect bbox format, expects four comma separated C locale values";
     char *l;
     setlocale(LC_NUMERIC, "C");
 
-    do {
+    do { // Something to break out of
         bbox->xmin = strtod(line, &l); if (*l++ != ',') break;
         bbox->ymin = strtod(l, &l);    if (*l++ != ',') break;
         bbox->xmax = strtod(l, &l);    if (*l++ != ',') break;
         bbox->ymax = strtod(l, &l);
-        message = NULL;
+        message = NULL; // Success
     } while (false);
 
     setlocale(LC_NUMERIC, lcl);
@@ -84,17 +84,17 @@ static const char *get_xyzc_size(struct sz *size, const char *value) {
     size->y = apr_strtoi64(s, &s, 0);
     size->c = 3;
     size->z = 1;
-    if (errno == 0 && *s) { // Read optional third and fourth integers
+    if (errno == 0 && *s != NULL) { // Read optional third and fourth integers
         size->z = apr_strtoi64(s, &s, 0);
-        if (*s)
+        if (*s != NULL)
             size->c = apr_strtoi64(s, &s, 0);
     } // Raster size is 4 params max
-    if (errno || *s)
+    if (errno != 0 || *s != NULL)
         return " incorrect format";
     return NULL;
 }
 
-static const char *ConfigRaster(apr_pool_t *p, apr_table_t *kvp, struct TiledRaster &raster)
+static const char *ConfigRaster(apr_pool_t *p, apr_table_t *kvp, TiledRaster &raster)
 {
     const char *line;
     line = apr_table_get(kvp, "Size");
@@ -131,7 +131,6 @@ static const char *ConfigRaster(apr_pool_t *p, apr_table_t *kvp, struct TiledRas
             return apr_pstrcat(p, "BoundingBox", err_message, NULL);
 
     init_rsets(p, raster);
-
     return NULL;
 }
 
@@ -182,7 +181,7 @@ static const char *read_config(cmd_parms *cmd, twms_conf *c, const char *src, co
 
     line = apr_table_get(kvp, "SourcePath");
     if (!line)
-        return "SOurcePath directive missing";
+        return "SourcePath directive missing";
     c->source = apr_pstrdup(cmd->pool, line);
 
     line = apr_table_get(kvp, "SourcePostfix");
@@ -206,7 +205,7 @@ static const char *set_regexp(cmd_parms *cmd, twms_conf *c, const char *pattern)
         int msize = 2048;
         err_message = (char *)apr_pcalloc(cmd->pool, msize);
         ap_regerror(error, m, err_message, msize);
-        return apr_pstrcat(cmd->pool, "Reproject Regexp incorrect ", err_message, NULL);
+        return apr_pstrcat(cmd->pool, "tWMS Regexp incorrect ", err_message, NULL);
     }
     return NULL;
 }
@@ -257,18 +256,24 @@ static sz *bbox_to_tile(const TiledRaster &raster, const bbox_t &bb, sz *tile) {
         if (!ordered(resx - dx, rx, resx + dx)) continue;
         const double ry = raster.rsets[l].ry * raster.pagesize.y; // tile resolution
         if (!ordered(resy - dy, ry , resy + dy)) continue;
-        // Found a match at level l
-        tile->l = l - raster.skip;
         // figure out the tile row and column
         // Casting truncates, add half pixel to avoid the fp noise
         tile->x = static_cast<apr_int64_t>((bb.xmin + dx - raster.bbox.xmin) / rx);
         tile->y = static_cast<apr_int64_t>((raster.bbox.ymax - bb.ymax - dy) / ry);
+
+        // Check that the tile is within the box for this level
+        if (tile->x < 0 || tile->x >= raster.rsets[l].width) return NULL;
+        if (tile->y < 0 || tile->y >= raster.rsets[l].height) return NULL;
+
         // Check that the provided coordinates are within half pixel
         double xm = raster.bbox.xmin + tile->x * rx;
         if (!ordered(xm - dx, bb.xmin, xm + dx)) return NULL;
         double ym = raster.bbox.ymax - tile->y * ry;
         if (!ordered(ym - dy, bb.ymax, ym + dy)) return NULL;
-        // Indeed, this is the right tile
+        // Indeed, this is the right tile, is it within the level?
+
+        // Adjust the level
+        tile->l = l - raster.skip;
         return tile;
     }
     return NULL;
@@ -290,6 +295,9 @@ static int handler(request_rec *r)
 
     bbox_t bbox;
     message = getbbox(bb_string, &bbox);
+    if (message != NULL) // Bounding box formatting error
+        return HTTP_BAD_REQUEST;
+
     // Got the bounding box, need to figure out the tile request
     sz tile;
     twms_conf *cfg = static_cast<twms_conf *>ap_get_module_config(r->per_dir_config, &twms_module);
@@ -301,12 +309,22 @@ static int handler(request_rec *r)
     unsigned int level  = static_cast<unsigned int>(tile.l);
     unsigned int row    = static_cast<unsigned int>(tile.y);
     unsigned int column = static_cast<unsigned int>(tile.x);
-#define NURI_FMT "%s/%u/%u/%u"
 
-    char *new_uri = (cfg->postfix == NULL) ?
-        apr_psprintf(r->pool, NURI_FMT, cfg->source, level, row, column) :
-        apr_psprintf(r->pool, NURI_FMT "%s", cfg->source, level, row, column, cfg->postfix);
-#undef NURI_FMT
+    const char *m_string = apr_table_get(args, "M"); // Extra dimension
+    unsigned int m_val = 0;
+
+    char *new_uri;
+    if (m_string) { // We have an extra dimension
+        m_val = static_cast<unsigned int>(apr_atoi64(m_string));
+        new_uri = (cfg->postfix == NULL) ?
+            apr_psprintf(r->pool, "%s/%u/%u/%u/%u" , cfg->source, m_val, level, row, column) :
+            apr_psprintf(r->pool, "%s/%u/%u/%u/%u%s", cfg->source, m_val, level, row, column, cfg->postfix);
+    }
+    else {
+        new_uri = (cfg->postfix == NULL) ?
+            apr_psprintf(r->pool, "%s/%u/%u/%u", cfg->source, level, row, column) :
+            apr_psprintf(r->pool, "%s/%u/%u/%u%s", cfg->source, level, row, column, cfg->postfix);
+    }
 
     ap_internal_redirect(new_uri, r);
     return OK; // Not sure what this does, because it was already handled

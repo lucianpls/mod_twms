@@ -82,8 +82,7 @@ struct bbox_t {
 };
 
 struct rset {
-    // Resolution in units per pixel
-    double rx, ry;
+    double rx, ry;     // Resolution in units per pixel
     int width, height; // In tiles
 };
 
