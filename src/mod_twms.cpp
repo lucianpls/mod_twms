@@ -6,11 +6,17 @@
  *
  */
 
+#define NOMINMAX
+
 #include "mod_twms.h"
 #include <receive_context.h>
 #include <clocale>
 #include <cmath>
+
+// for max()
 #include <algorithm>
+
+using namespace std;
 
 // Tokenize the URI parameters
 static apr_table_t* tokenize_args(request_rec *r)
@@ -18,7 +24,7 @@ static apr_table_t* tokenize_args(request_rec *r)
     apr_table_t *tab = apr_table_make(r->pool, 8);
     const char *val, *key, *data = r->args;
     for (data = r->args; data && *data && (val = ap_getword(r->pool, &data, '&'));)
-        if (key = ap_getword(r->pool, &val, '='))
+        if (NULL != (key = ap_getword(r->pool, &val, '=')))
             apr_table_addn(tab, key, val);
     return tab;
 }
@@ -36,7 +42,7 @@ static void init_rsets(apr_pool_t *p, struct TiledRaster &raster)
     level.ry = (raster.bbox.ymax - raster.bbox.ymin) / raster.size.y;
 
     // How many levels do we have
-    raster.n_levels = 2 + ilogb(max(level.height, level.width) - 1);
+    raster.n_levels = 2 + ilogb(std::max(level.height, level.width) - 1);
     raster.rsets = (struct rset *)apr_pcalloc(p, sizeof(rset) * raster.n_levels);
 
     // Populate rsets from the bottom, the way tile protcols count levels
@@ -85,12 +91,12 @@ static const char *get_xyzc_size(struct sz *size, const char *value) {
     size->y = apr_strtoi64(s, &s, 0);
     size->c = 3;
     size->z = 1;
-    if (errno == 0 && *s != NULL) { // Read optional third and fourth integers
+    if (errno == 0 && *s != 0) { // Read optional third and fourth integers
         size->z = apr_strtoi64(s, &s, 0);
-        if (*s != NULL)
+        if (*s != 0)
             size->c = apr_strtoi64(s, &s, 0);
     } // Raster size is 4 params max
-    if (errno != 0 || *s != NULL)
+    if (errno != 0 || *s != 0)
         return " incorrect format";
     return NULL;
 }
@@ -108,7 +114,7 @@ static const char *ConfigRaster(apr_pool_t *p, apr_table_t *kvp, TiledRaster &ra
     raster.pagesize.x = raster.pagesize.y = 512;
     line = apr_table_get(kvp, "PageSize");
     if (line)
-        if (err_message = get_xyzc_size(&(raster.pagesize), line))
+        if (NULL == (err_message = get_xyzc_size(&(raster.pagesize), line)))
             return apr_pstrcat(p, "PageSize", err_message, NULL);
 
     // Optional data type, defaults to unsigned byte
@@ -128,7 +134,7 @@ static const char *ConfigRaster(apr_pool_t *p, apr_table_t *kvp, TiledRaster &ra
 
     line = apr_table_get(kvp, "BoundingBox");
     if (line)
-        if (err_message = getbbox(line, &raster.bbox))
+        if (NULL == (err_message = getbbox(line, &raster.bbox)))
             return apr_pstrcat(p, "BoundingBox", err_message, NULL);
 
     init_rsets(p, raster);
