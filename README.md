@@ -5,6 +5,18 @@
 
 An apache httpd module converting tiledWMS requests to the REST M/L/R/C encoding
 
+* Requirements
+- Apache 2.x, runtime and development
+* Building
+
+** Linux
+In the src folder, edit Copy Makefile.lcl.example as Makefile.lcl, edit content to match the current system.  Then run make.
+
+** Windows
+Visual Studio 2013 solution is included.  It assumes Apache 2.4 is installed under __\\Apache24, including the development files.
+
+* Usage
+
 Implements two apache configuration directives:
 **tWMS_RegExp string**
 Can be present more than once, one of the existing regular expressions has to match the request URL for the request to be considered

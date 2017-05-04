@@ -10,6 +10,7 @@
 #include <receive_context.h>
 #include <clocale>
 #include <cmath>
+#include <algorithm>
 
 // Tokenize the URI parameters
 static apr_table_t* tokenize_args(request_rec *r)

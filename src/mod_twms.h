@@ -14,7 +14,6 @@
 #include <http_core.h>
 #include <http_request.h>
 #include <http_log.h>
-
 #include <apr_strings.h>
 
 #if defined(APLOG_USE_MODULE)
