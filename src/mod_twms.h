@@ -109,7 +109,7 @@ struct twms_conf {
     const char *source, *postfix;
 
     // array of guard regexp, one of them has to match
-    apr_array_header_t *regexp;
+    apr_array_header_t *arr_rxp;
 
     // The output and input raster figures
     TiledRaster raster;

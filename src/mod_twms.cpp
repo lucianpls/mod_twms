@@ -204,17 +204,11 @@ static const char *read_config(cmd_parms *cmd, twms_conf *c, const char *src, co
 static const char *set_regexp(cmd_parms *cmd, twms_conf *c, const char *pattern)
 {
     char *err_message = NULL;
-    if (c->regexp == 0)
-        c->regexp = apr_array_make(cmd->pool, 2, sizeof(ap_regex_t));
-    ap_regex_t *m = (ap_regex_t *)apr_array_push(c->regexp);
-    int error = ap_regcomp(m, pattern, 0);
-    if (error) {
-        int msize = 2048;
-        err_message = (char *)apr_pcalloc(cmd->pool, msize);
-        ap_regerror(error, m, err_message, msize);
-        return apr_pstrcat(cmd->pool, "tWMS Regexp incorrect ", err_message, NULL);
-    }
-    return NULL;
+    if (c->arr_rxp == 0)
+        c->arr_rxp = apr_array_make(cmd->pool, 2, sizeof(ap_regex_t *));
+    ap_regex_t **m = (ap_regex_t **)apr_array_push(c->arr_rxp);
+    *m = ap_pregcomp(cmd->pool, pattern, 0);
+    return (NULL != *m) ? NULL : "Bad regular expression";
 }
 
 static void *create_dir_config(apr_pool_t *p, char *path)
@@ -231,10 +225,10 @@ static bool our_request(request_rec *r) {
     twms_conf *cfg = static_cast<twms_conf *>ap_get_module_config(r->per_dir_config, &twms_module);
     if (!cfg->enabled) return false;
 
-    if (cfg->regexp) { // Check the guard regexps if they exist, matches agains URL
+    if (cfg->arr_rxp) { // Check the guard regexps if they exist, matches agains URL
         char *url_to_match = r->args ? apr_pstrcat(r->pool, r->uri, "?", r->args, NULL) : r->uri;
-        for (int i = 0; i < cfg->regexp->nelts; i++) {
-            ap_regex_t *m = &APR_ARRAY_IDX(cfg->regexp, i, ap_regex_t);
+        for (int i = 0; i < cfg->arr_rxp->nelts; i++) {
+            ap_regex_t *m = APR_ARRAY_IDX(cfg->arr_rxp, i, ap_regex_t *);
             if (!ap_regexec(m, url_to_match, 0, NULL, 0)) return true; // Found
         }
     }
