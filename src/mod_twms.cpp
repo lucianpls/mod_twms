@@ -260,7 +260,7 @@ static sz *bbox_to_tile(const TiledRaster &raster, const bbox_t &bb, sz *tile) {
         // figure out the tile row and column
         // Casting truncates, add half pixel to avoid the fp noise
         tile->x = static_cast<apr_int64_t>((bb.xmin + dx - raster.bbox.xmin) / rx);
-        tile->y = static_cast<apr_int64_t>((raster.bbox.ymax - bb.ymax - dy) / ry);
+        tile->y = static_cast<apr_int64_t>((raster.bbox.ymax - bb.ymax + dy) / ry);
 
         // Check that the tile is within the box for this level
         if (tile->x < 0 || tile->x >= raster.rsets[l].width) return NULL;
