@@ -36,5 +36,6 @@ Raster and tiled WMS specific directives
 
 * SourcePostfix string : Optional, a string which will be appended to the source URL, after the tile address.  Can not include http paramters.
 
-The extra dimension of the tile dataset can be passed as the value for the parameter called M. If present, the source service will receive tile requests with four numerical values, M/L/R/C
+The extra dimension of the tile dataset can be passed as the value for the parameter called M. If present, the source service will receive tile requests with four numerical values, M/L/R/C.  
+Otherwise, only L/R/C will be present
 
