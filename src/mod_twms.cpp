@@ -203,7 +203,6 @@ static const char *read_config(cmd_parms *cmd, twms_conf *c, const char *src, co
 // One of them has to match if the request is to be considered
 static const char *set_regexp(cmd_parms *cmd, twms_conf *c, const char *pattern)
 {
-    char *err_message = NULL;
     if (c->arr_rxp == 0)
         c->arr_rxp = apr_array_make(cmd->pool, 2, sizeof(ap_regex_t *));
     ap_regex_t **m = (ap_regex_t **)apr_array_push(c->arr_rxp);

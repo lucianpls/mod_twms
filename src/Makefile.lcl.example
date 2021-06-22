@@ -1,6 +1,8 @@
-INCLUDES = -I /usr/include/apache2 -I /usr/include/apr-1.0
-MOD_PATH = /usr/lib/apache2/modules
+APXS = apxs
+includedir = $(shell $(APXS) -q includedir 2>/dev/null)
+EXTRA_INCLUDES = $(shell $(APXS) -q EXTRA_INCLUDES 2>/dev/null)
+LIBTOOL = $(shell $(APXS) -q LIBTOOL 2>/dev/null)
 
-## Uncoment this if LUA lookup functionality is needed
-# HAS_LUA = TRUE
-
+# SUDO = sudo
+CP = cp
+DEST = /etc/httpd/modules

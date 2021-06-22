@@ -29,7 +29,7 @@
 ipch
 Debug
 Release
-*.lcl
+Makefile.lcl
 .vs
 
 # Executables
