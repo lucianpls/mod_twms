@@ -10,10 +10,10 @@ An apache httpd module converting tiledWMS requests to the REST M/L/R/C encoding
 * Building
 
 ** Linux
-In the src folder, edit Copy Makefile.lcl.example as Makefile.lcl, edit content to match the current system.  Then run make.
+In the src folder, rename Makefile.lcl.example as Makefile.lcl, edit content to match the current system. Then run make.
 
 ** Windows
-Visual Studio 2013 solution is included.  It assumes Apache 2.4 is installed under __\\Apache24, including the development files.
+Visual Studio solution is included. It assumes Apache 2.4 is installed under `\Apache24`, including the development files.
 
 * Usage
 
