@@ -26,7 +26,7 @@ $(TARGET)       :       $(OBJECTS)
 	libtool --mode=link g++ -o $(MODULE).la -rpath $(LIBEXECDIR) -module -avoid-version $^ $(LIBS)
 
 %.lo	:	%.cpp
-	libtool --mode=compile g++ -std=c++0x -prefer-pic -O2 -Wall $(DEFINES) $(EXTRA_INCLUDES) -pthread -c -o $@ $< && touch $(@:.lo=.slo)
+	libtool --mode=compile g++ -std=c++0x -prefer-pic -O2 -Wall $(DEFINES) $(EXTRA_INCLUDES) -I $(EXP_INCLUDEDIR) -pthread -c -o $@ $< && touch $(@:.lo=.slo)
 
 install : $(TARGET)
 	$(SUDO) $(CP) $(TARGET) $(DEST)
